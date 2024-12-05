@@ -2452,10 +2452,15 @@ export default async function build(
               PRERENDER_MANIFEST,
               path.join(SERVER_DIRECTORY, MIDDLEWARE_MANIFEST),
               path.join(SERVER_DIRECTORY, MIDDLEWARE_BUILD_MANIFEST + '.js'),
-              path.join(
-                SERVER_DIRECTORY,
-                MIDDLEWARE_REACT_LOADABLE_MANIFEST + '.js'
-              ),
+              ...(!process.env.TURBOPACK
+                ? [
+                    path.join(
+                      SERVER_DIRECTORY,
+                      MIDDLEWARE_REACT_LOADABLE_MANIFEST + '.js'
+                    ),
+                    REACT_LOADABLE_MANIFEST,
+                  ]
+                : []),
               ...(appDir
                 ? [
                     ...(config.experimental.sri
@@ -2489,7 +2494,6 @@ export default async function build(
                     path.join(SERVER_DIRECTORY, DYNAMIC_CSS_MANIFEST + '.js'),
                   ]
                 : []),
-              REACT_LOADABLE_MANIFEST,
               BUILD_ID_FILE,
               path.join(SERVER_DIRECTORY, NEXT_FONT_MANIFEST + '.js'),
               path.join(SERVER_DIRECTORY, NEXT_FONT_MANIFEST + '.json'),

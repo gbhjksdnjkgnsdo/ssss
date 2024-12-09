@@ -233,7 +233,7 @@ describe('middleware - development errors', () => {
         isTurbopack
           ? '\n ⨯ Error: booooom!' +
               // TODO(veil): Should be sourcemapped
-              '\n    at [project]/middleware.js [middleware] (ecmascript)'
+              '\n    at Object.__TURBOPACK__module__evaluation__ (middleware.js:3:12)'
           : '\n ⨯ Error: booooom!' +
               // TODO: Should be anonymous method without a method name
               '\n    at <unknown> (middleware.js:3)' +

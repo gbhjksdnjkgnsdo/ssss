@@ -98,21 +98,16 @@ describe('non-root-project-monorepo', () => {
         if (isTurbopack) {
           // TODO the function name should be hidden
           expect(await getRedboxSource(browser)).toMatchInlineSnapshot(`
-            "app/source-maps-rsc/page.tsx (9:28) @ innerArrowFunction
+            "app/separate-file.ts (1:7) @ Object.{module evaluation}
 
-               7 | }
-               8 |
-            >  9 | const innerArrowFunction = () => {
-                 |                            ^
-              10 |   require('../separate-file')
-              11 | }
-              12 |"
+            > 1 | throw new Error('Expected error')
+                |       ^
+              2 |"
           `)
-          // TODO stacktrace-parser breaks in some cases with the rsc:// protocol
           expect(normalizeStackTrace(await getRedboxCallStack(browser)))
             .toMatchInlineSnapshot(`
-            "<unknown>
-            [project]/apps/web/app/separate-file.ts [app-rsc] (ecmascript) (rsc://React/Server/file://<full-path>/apps/web/.next/server/chunks/ssr/apps_web_8d1c0a._.js (7:7)
+            "innerArrowFunction
+            ./app/source-maps-rsc/page.tsx (9:28)
             innerFunction
             app/source-maps-rsc/page.tsx (6:3)
             Page
@@ -128,6 +123,7 @@ describe('non-root-project-monorepo', () => {
               2 |"
           `)
           // TODO webpack runtime code shouldn't be included in stack trace
+          // TODO stacktrace-parser breaks in some cases with the rsc:// protocol
           expect(normalizeStackTrace(await getRedboxCallStack(browser)))
             .toMatchInlineSnapshot(`
             "<unknown>
@@ -152,7 +148,7 @@ describe('non-root-project-monorepo', () => {
         if (isTurbopack) {
           // TODO the function name should be hidden
           expect(await getRedboxSource(browser)).toMatchInlineSnapshot(`
-            "app/separate-file.ts (1:7) @ [project]/apps/web/app/separate-file.ts [app-client] (ecmascript)
+            "app/separate-file.ts (1:7) @ Object.{module evaluation}
 
             > 1 | throw new Error('Expected error')
                 |       ^
@@ -205,7 +201,7 @@ describe('non-root-project-monorepo', () => {
         if (isTurbopack) {
           // TODO the function name should be hidden
           expect(await getRedboxSource(browser)).toMatchInlineSnapshot(`
-            "app/separate-file.ts (1:7) @ [project]/apps/web/app/separate-file.ts [app-client] (ecmascript)
+            "app/separate-file.ts (1:7) @ Object.{module evaluation}
 
             > 1 | throw new Error('Expected error')
                 |       ^

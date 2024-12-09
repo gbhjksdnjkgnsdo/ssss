@@ -65,6 +65,11 @@ impl NodeJsChunkingContextBuilder {
         self
     }
 
+    pub fn use_annotated_stack_traces(mut self) -> Self {
+        self.chunking_context.should_use_annotated_stack_traces = true;
+        self
+    }
+
     pub fn module_id_strategy(
         mut self,
         module_id_strategy: ResolvedVc<Box<dyn ModuleIdStrategy>>,
@@ -111,6 +116,8 @@ pub struct NodeJsChunkingContext {
     module_id_strategy: ResolvedVc<Box<dyn ModuleIdStrategy>>,
     /// Whether to use file:// uris for source map sources
     should_use_file_source_map_uris: bool,
+    /// Whether to give generated functions better names for stack traces
+    should_use_annotated_stack_traces: bool,
 }
 
 impl NodeJsChunkingContext {
@@ -140,6 +147,7 @@ impl NodeJsChunkingContext {
                 minify_type: MinifyType::NoMinify,
                 manifest_chunks: false,
                 should_use_file_source_map_uris: false,
+                should_use_annotated_stack_traces: false,
                 module_id_strategy: ResolvedVc::upcast(DevModuleIdStrategy::new_resolved()),
             },
         }
@@ -267,6 +275,11 @@ impl ChunkingContext for NodeJsChunkingContext {
     #[turbo_tasks::function]
     fn should_use_file_source_map_uris(&self) -> Vc<bool> {
         Vc::cell(self.should_use_file_source_map_uris)
+    }
+
+    #[turbo_tasks::function]
+    fn should_use_annotated_stack_traces(&self) -> Vc<bool> {
+        Vc::cell(self.should_use_annotated_stack_traces)
     }
 
     #[turbo_tasks::function]

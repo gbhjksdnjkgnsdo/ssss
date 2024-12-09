@@ -1013,7 +1013,9 @@ pub async fn get_server_chunking_context_with_client_assets(
     .file_tracing(next_mode.is_production());
 
     if next_mode.is_development() {
-        builder = builder.use_file_source_map_uris();
+        builder = builder
+            .use_file_source_map_uris()
+            .use_annotated_stack_traces();
     }
     Ok(builder.build())
 }
@@ -1051,7 +1053,9 @@ pub async fn get_server_chunking_context(
     .file_tracing(next_mode.is_production());
 
     if next_mode.is_development() {
-        builder = builder.use_file_source_map_uris()
+        builder = builder
+            .use_file_source_map_uris()
+            .use_annotated_stack_traces();
     }
 
     Ok(builder.build())

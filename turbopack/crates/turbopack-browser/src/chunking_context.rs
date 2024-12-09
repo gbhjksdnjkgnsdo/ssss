@@ -49,6 +49,11 @@ impl BrowserChunkingContextBuilder {
         self
     }
 
+    pub fn use_annotated_stack_traces(mut self) -> Self {
+        self.chunking_context.should_use_annotated_stack_traces = true;
+        self
+    }
+
     pub fn tracing(mut self, enable_tracing: bool) -> Self {
         self.chunking_context.enable_tracing = enable_tracing;
         self
@@ -116,6 +121,8 @@ pub struct BrowserChunkingContext {
     root_path: ResolvedVc<FileSystemPath>,
     /// Whether to write file sources as file:// paths in source maps
     should_use_file_source_map_uris: bool,
+    /// Whether to give generated functions better names for stack traces
+    should_use_annotated_stack_traces: bool,
     /// This path is used to compute the url to request chunks from
     output_root: ResolvedVc<FileSystemPath>,
     /// The relative path from the output_root to the root_path.
@@ -172,6 +179,7 @@ impl BrowserChunkingContext {
                 client_root,
                 chunk_root_path,
                 should_use_file_source_map_uris: false,
+                should_use_annotated_stack_traces: false,
                 reference_chunk_source_maps: true,
                 reference_css_chunk_source_maps: true,
                 asset_root_path,
@@ -381,6 +389,11 @@ impl ChunkingContext for BrowserChunkingContext {
     #[turbo_tasks::function]
     fn should_use_file_source_map_uris(&self) -> Vc<bool> {
         Vc::cell(self.should_use_file_source_map_uris)
+    }
+
+    #[turbo_tasks::function]
+    fn should_use_annotated_stack_traces(&self) -> Vc<bool> {
+        Vc::cell(self.should_use_annotated_stack_traces)
     }
 
     #[turbo_tasks::function]

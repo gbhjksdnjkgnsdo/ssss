@@ -664,6 +664,7 @@ impl Project {
                 node_build_environment().to_resolved().await?,
                 next_mode.runtime_type(),
             )
+            .use_annotated_stack_traces()
             .build(),
         );
 

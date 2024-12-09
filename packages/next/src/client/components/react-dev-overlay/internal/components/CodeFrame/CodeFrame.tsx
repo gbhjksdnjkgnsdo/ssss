@@ -5,6 +5,7 @@ import stripAnsi from 'next/dist/compiled/strip-ansi'
 import { getFrameSource } from '../../helpers/stack-frame'
 import { useOpenInEditor } from '../../helpers/use-open-in-editor'
 import { HotlinkedText } from '../hot-linked-text'
+import { isHiddenMethodName } from '../../../../../../shared/lib/stack-trace-utils'
 
 export type CodeFrameProps = { stackFrame: StackFrame; codeFrame: string }
 
@@ -66,10 +67,14 @@ export const CodeFrame: React.FC<CodeFrameProps> = function CodeFrame({
           tabIndex={1}
           title="Click to open in your editor"
         >
-          <span>
-            {getFrameSource(stackFrame)} @{' '}
-            <HotlinkedText text={stackFrame.methodName} />
-          </span>
+          {isHiddenMethodName(stackFrame.methodName) ? (
+            <span>{getFrameSource(stackFrame)}</span>
+          ) : (
+            <span>
+              {getFrameSource(stackFrame)} @{' '}
+              <HotlinkedText text={stackFrame.methodName} />
+            </span>
+          )}
           <svg
             xmlns="http://www.w3.org/2000/svg"
             viewBox="0 0 24 24"

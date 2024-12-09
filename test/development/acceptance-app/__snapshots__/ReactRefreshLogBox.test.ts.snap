@@ -65,7 +65,7 @@ exports[`ReactRefreshLogBox app default logbox: anchors links in error messages 
 exports[`ReactRefreshLogBox app default logbox: anchors links in error messages 7`] = `"https://nextjs.org/"`;
 
 exports[`ReactRefreshLogBox app default module init error not shown 1`] = `
-"index.js (3:7) @ eval
+"index.js (3:7)
 
   1 | // top offset for snapshot
   2 | import * as React from 'react';
@@ -86,7 +86,7 @@ exports[`ReactRefreshLogBox app default should hide unrelated frames in stack tr
 `;
 
 exports[`ReactRefreshLogBox app default should hide unrelated frames in stack trace with unknown anonymous calls 1`] = `
-"app/page.js (4:13) @ eval
+"app/page.js (4:13)
 
   2 |   try {
   3 |     (function() {
@@ -190,7 +190,7 @@ exports[`ReactRefreshLogBox app turbo should hide unrelated frames in stack trac
 `;
 
 exports[`ReactRefreshLogBox app turbo should hide unrelated frames in stack trace with unknown anonymous calls 1`] = `
-"app/page.js (4:13) @ <anonymous>
+"app/page.js (4:13)
 
   2 |   try {
   3 |     (function() {

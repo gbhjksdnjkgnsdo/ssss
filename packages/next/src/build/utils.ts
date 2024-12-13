@@ -1519,6 +1519,7 @@ export async function isPageStatic({
   cacheLifeProfiles,
   pprConfig,
   buildId,
+  sriEnabled,
 }: {
   dir: string
   page: string
@@ -1545,6 +1546,7 @@ export async function isPageStatic({
   nextConfigOutput: 'standalone' | 'export' | undefined
   pprConfig: ExperimentalPPRConfig | undefined
   buildId: string
+  sriEnabled: boolean
 }): Promise<PageIsStaticResult> {
   await createIncrementalCache({
     cacheHandler,
@@ -1615,6 +1617,7 @@ export async function isPageStatic({
           page: originalAppPath || page,
           isAppPath: pageType === 'app',
           isDev: false,
+          sriEnabled,
         })
       }
       const Comp = componentsResult.Component as NextComponentType | undefined
@@ -1858,11 +1861,13 @@ export async function hasCustomGetInitialProps({
   distDir,
   runtimeEnvConfig,
   checkingApp,
+  sriEnabled,
 }: {
   page: string
   distDir: string
   runtimeEnvConfig: any
   checkingApp: boolean
+  sriEnabled: boolean
 }): Promise<boolean> {
   require('../shared/lib/runtime-config.external').setConfig(runtimeEnvConfig)
 
@@ -1871,6 +1876,7 @@ export async function hasCustomGetInitialProps({
     page: page,
     isAppPath: false,
     isDev: false,
+    sriEnabled,
   })
   let mod = components.ComponentMod
 
@@ -1887,10 +1893,12 @@ export async function getDefinedNamedExports({
   page,
   distDir,
   runtimeEnvConfig,
+  sriEnabled,
 }: {
   page: string
   distDir: string
   runtimeEnvConfig: any
+  sriEnabled: boolean
 }): Promise<ReadonlyArray<string>> {
   require('../shared/lib/runtime-config.external').setConfig(runtimeEnvConfig)
   const components = await loadComponents({
@@ -1898,6 +1906,7 @@ export async function getDefinedNamedExports({
     page: page,
     isAppPath: false,
     isDev: false,
+    sriEnabled,
   })
 
   return Object.keys(components.ComponentMod).filter((key) => {

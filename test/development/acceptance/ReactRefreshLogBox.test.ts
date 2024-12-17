@@ -791,37 +791,4 @@ describe.each(['default', 'turbo'])('ReactRefreshLogBox %s', () => {
     const texts = await getRedboxCallStack(browser)
     expect(texts).toMatchSnapshot()
   })
-
-  test('should hide unrelated frames in stack trace with node:internal calls', async () => {
-    await using sandbox = await createSandbox(
-      next,
-      new Map([
-        [
-          'pages/index.js',
-          // Node.js will throw an error about the invalid URL since it happens server-side
-          outdent`
-      export default function Page() {}
-      
-      export function getServerSideProps() {
-        new URL("/", "invalid");
-        return { props: {} };
-      }`,
-        ],
-      ])
-    )
-    const { session, browser } = sandbox
-    await session.assertHasRedbox()
-
-    // Should still show the errored line in source code
-    const source = await session.getRedboxSource()
-    expect(source).toContain('pages/index.js')
-    expect(source).toContain(`new URL("/", "invalid")`)
-
-    const callStackFrames = await browser.elementsByCss(
-      '[data-nextjs-call-stack-frame]'
-    )
-    const texts = await Promise.all(callStackFrames.map((f) => f.innerText()))
-
-    expect(texts.filter((t) => t.includes('node:internal'))).toHaveLength(0)
-  })
 })

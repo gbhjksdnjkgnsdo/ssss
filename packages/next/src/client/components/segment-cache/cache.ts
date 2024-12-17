@@ -3,15 +3,20 @@ import type {
   RootTreePrefetch,
   SegmentPrefetch,
 } from '../../../server/app-render/collect-segment-data'
-import type { Segment as FlightRouterStateSegment } from '../../../server/app-render/types'
 import type {
   HeadData,
   LoadingModuleData,
 } from '../../../shared/lib/app-router-context.shared-runtime'
+import type {
+  CacheNodeSeedData,
+  Segment as FlightRouterStateSegment,
+} from '../../../server/app-render/types'
 import {
   NEXT_DID_POSTPONE_HEADER,
   NEXT_ROUTER_PREFETCH_HEADER,
   NEXT_ROUTER_SEGMENT_PREFETCH_HEADER,
+  NEXT_ROUTER_STALE_TIME_HEADER,
+  NEXT_ROUTER_STATE_TREE_HEADER,
   NEXT_URL,
   RSC_CONTENT_TYPE_HEADER,
   RSC_HEADER,
@@ -41,6 +46,12 @@ import {
   encodeSegment,
   ROOT_SEGMENT_KEY,
 } from '../../../server/app-render/segment-value-encoding'
+import type {
+  FlightRouterState,
+  NavigationFlightResponse,
+} from '../../../server/app-render/types'
+import { normalizeFlightData } from '../../flight-data-helpers'
+import { STATIC_STALETIME_MS } from '../router-reducer/prefetch-cache-utils'
 
 // A note on async/await when working in the prefetch cache:
 //
@@ -65,7 +76,7 @@ import {
 
 export type RouteTree = {
   key: string
-  token: string
+  token: string | null
   segment: FlightRouterStateSegment
   slots: null | {
     [parallelRouteKey: string]: RouteTree
@@ -95,8 +106,8 @@ type RouteCacheEntryShared = {
 export const enum EntryStatus {
   Empty,
   Pending,
-  Rejected,
   Fulfilled,
+  Rejected,
 }
 
 type PendingRouteCacheEntry = RouteCacheEntryShared & {
@@ -106,6 +117,7 @@ type PendingRouteCacheEntry = RouteCacheEntryShared & {
   tree: null
   head: HeadData | null
   isHeadPartial: true
+  isPPREnabled: false
 }
 
 type RejectedRouteCacheEntry = RouteCacheEntryShared & {
@@ -115,6 +127,7 @@ type RejectedRouteCacheEntry = RouteCacheEntryShared & {
   tree: null
   head: null
   isHeadPartial: true
+  isPPREnabled: boolean
 }
 
 export type FulfilledRouteCacheEntry = RouteCacheEntryShared & {
@@ -124,6 +137,7 @@ export type FulfilledRouteCacheEntry = RouteCacheEntryShared & {
   tree: RouteTree
   head: HeadData
   isHeadPartial: boolean
+  isPPREnabled: boolean
 }
 
 export type RouteCacheEntry =
@@ -141,7 +155,7 @@ type SegmentCacheEntryShared = {
   size: number
 }
 
-type PendingSegmentCacheEntry = SegmentCacheEntryShared & {
+export type PendingSegmentCacheEntry = SegmentCacheEntryShared & {
   status: EntryStatus.Empty | EntryStatus.Pending
   rsc: null
   loading: null
@@ -308,6 +322,8 @@ export function readOrCreateRouteCacheEntry(
     // could be intercepted. It's only set to false once we receive a response
     // from the server.
     couldBeIntercepted: true,
+    // Similarly, we don't yet know if the route supports PPR.
+    isPPREnabled: false,
 
     // LRU-related fields
     keypath: null,
@@ -331,6 +347,7 @@ export function readOrCreateRouteCacheEntry(
  */
 export function readOrCreateSegmentCacheEntry(
   now: number,
+  // TODO: Don't need to pass the whole route. Just `staleAt`.
   route: FulfilledRouteCacheEntry,
   path: string
 ): SegmentCacheEntry {
@@ -421,13 +438,14 @@ function pingBlockedTasks(entry: {
 }
 
 function fulfillRouteCacheEntry(
-  entry: PendingRouteCacheEntry,
+  entry: RouteCacheEntry,
   tree: RouteTree,
   head: HeadData,
   isHeadPartial: boolean,
   staleAt: number,
   couldBeIntercepted: boolean,
-  canonicalUrl: string
+  canonicalUrl: string,
+  isPPREnabled: boolean
 ): FulfilledRouteCacheEntry {
   const fulfilledEntry: FulfilledRouteCacheEntry = entry as any
   fulfilledEntry.status = EntryStatus.Fulfilled
@@ -437,6 +455,7 @@ function fulfillRouteCacheEntry(
   fulfilledEntry.staleAt = staleAt
   fulfilledEntry.couldBeIntercepted = couldBeIntercepted
   fulfilledEntry.canonicalUrl = canonicalUrl
+  fulfilledEntry.isPPREnabled = isPPREnabled
   pingBlockedTasks(entry)
   return fulfilledEntry
 }
@@ -530,6 +549,79 @@ function convertTreePrefetchToRouteTree(
   }
 }
 
+function convertRootFlightRouterStateToRouteTree(
+  flightRouterState: FlightRouterState
+): RouteTree {
+  return convertFlightRouterStateToRouteTree(
+    flightRouterState,
+    ROOT_SEGMENT_KEY
+  )
+}
+
+function convertFlightRouterStateToRouteTree(
+  flightRouterState: FlightRouterState,
+  key: string
+): RouteTree {
+  let slots: { [parallelRouteKey: string]: RouteTree } | null = null
+
+  const parallelRoutes = flightRouterState[1]
+  for (let parallelRouteKey in parallelRoutes) {
+    const childRouterState = parallelRoutes[parallelRouteKey]
+    const childSegment = childRouterState[0]
+    // TODO: Eventually, the param values will not be included in the response
+    // from the server. We'll instead fill them in on the client by parsing
+    // the URL. This is where we'll do that.
+    const childKey = encodeChildSegmentKey(
+      key,
+      parallelRouteKey,
+      encodeSegment(childSegment)
+    )
+    const childTree = convertFlightRouterStateToRouteTree(
+      childRouterState,
+      childKey
+    )
+    if (slots === null) {
+      slots = {
+        [parallelRouteKey]: childTree,
+      }
+    } else {
+      slots[parallelRouteKey] = childTree
+    }
+  }
+
+  return {
+    key,
+    // NOTE: Dynamic server responses do not currently include an access token.
+    // (They may in the future.) Which means this tree cannot be used to issue
+    // a per-segment prefetch.
+    token: null,
+    segment: flightRouterState[0],
+    slots,
+    isRootLayout: flightRouterState[4] === true,
+  }
+}
+
+export function convertRouteTreeToFlightRouterState(
+  routeTree: RouteTree
+): FlightRouterState {
+  const parallelRoutes: Record<string, FlightRouterState> = {}
+  if (routeTree.slots !== null) {
+    for (const parallelRouteKey in routeTree.slots) {
+      parallelRoutes[parallelRouteKey] = convertRouteTreeToFlightRouterState(
+        routeTree.slots[parallelRouteKey]
+      )
+    }
+  }
+  const flightRouterState: FlightRouterState = [
+    routeTree.segment,
+    parallelRoutes,
+    null,
+    null,
+    routeTree.isRootLayout,
+  ]
+  return flightRouterState
+}
+
 export async function fetchRouteOnCacheMiss(
   entry: PendingRouteCacheEntry,
   task: PrefetchTask
@@ -550,32 +642,10 @@ export async function fetchRouteOnCacheMiss(
       // PPR is enabled, because we always respond to route tree requests, even
       // if it needs to be blockingly generated on demand.
       response.status === 204 ||
-      // This checks whether the response was served from the per-segment cache,
-      // rather than the old prefetching flow. If it fails, it implies that PPR
-      // is disabled on this route.
-      // TODO: Add support for non-PPR routes.
-      response.headers.get(NEXT_DID_POSTPONE_HEADER) !== '2' ||
       !response.body
     ) {
       // Server responded with an error, or with a miss. We should still cache
       // the response, but we can try again after 10 seconds.
-      rejectRouteCacheEntry(entry, Date.now() + 10 * 1000)
-      return
-    }
-    const prefetchStream = createPrefetchResponseStream(
-      response.body,
-      routeCacheLru,
-      entry
-    )
-    const serverData: RootTreePrefetch = await (createFromNextReadableStream(
-      prefetchStream
-    ) as Promise<RootTreePrefetch>)
-    if (serverData.buildId !== getAppBuildId()) {
-      // The server build does not match the client. Treat as a 404. During
-      // an actual navigation, the router will trigger an MPA navigation.
-      // TODO: Consider moving the build ID to a response header so we can check
-      // it before decoding the response, and so there's one way of checking
-      // across all response types.
       rejectRouteCacheEntry(entry, Date.now() + 10 * 1000)
       return
     }
@@ -591,15 +661,66 @@ export async function fetchRouteOnCacheMiss(
     const couldBeIntercepted =
       varyHeader !== null && varyHeader.includes(NEXT_URL)
 
-    fulfillRouteCacheEntry(
-      entry,
-      convertRootTreePrefetchToRouteTree(serverData),
-      serverData.head,
-      serverData.isHeadPartial,
-      Date.now() + serverData.staleTime,
-      couldBeIntercepted,
-      canonicalUrl
-    )
+    // This checks whether the response was served from the per-segment cache,
+    // rather than the old prefetching flow. If it fails, it implies that PPR
+    // is disabled on this route.
+    // TODO: Add support for non-PPR routes.
+    const routeIsPPREnabled =
+      response.headers.get(NEXT_DID_POSTPONE_HEADER) === '2'
+    if (routeIsPPREnabled) {
+      const prefetchStream = createPrefetchResponseStream(
+        response.body,
+        routeCacheLru,
+        entry
+      )
+      const serverData = await (createFromNextReadableStream(
+        prefetchStream
+      ) as Promise<RootTreePrefetch>)
+      if (serverData.buildId !== getAppBuildId()) {
+        // The server build does not match the client. Treat as a 404. During
+        // an actual navigation, the router will trigger an MPA navigation.
+        // TODO: Consider moving the build ID to a response header so we can check
+        // it before decoding the response, and so there's one way of checking
+        // across all response types.
+        rejectRouteCacheEntry(entry, Date.now() + 10 * 1000)
+        return
+      }
+
+      fulfillRouteCacheEntry(
+        entry,
+        convertRootTreePrefetchToRouteTree(serverData),
+        serverData.head,
+        serverData.isHeadPartial,
+        Date.now() + serverData.staleTime,
+        couldBeIntercepted,
+        canonicalUrl,
+        routeIsPPREnabled
+      )
+    } else {
+      // PPR is not enabled for this route. The server responds with a
+      // different format (FlightRouterState) that we need to convert.
+      // TODO: We will unify the responses eventually. I'm keeping the types
+      // separate for now because FlightRouterState has so many
+      // overloaded concerns.
+      const prefetchStream = createPrefetchResponseStream(
+        response.body,
+        routeCacheLru,
+        entry
+      )
+      const serverData = await (createFromNextReadableStream(
+        prefetchStream
+      ) as Promise<NavigationFlightResponse>)
+
+      writeDynamicTreeResponseIntoCache(
+        Date.now(),
+        response,
+        serverData,
+        entry,
+        couldBeIntercepted,
+        canonicalUrl,
+        routeIsPPREnabled
+      )
+    }
 
     if (!couldBeIntercepted && nextUrl !== null) {
       // This route will never be intercepted. So we can use this entry for all
@@ -703,6 +824,249 @@ export async function fetchSegmentOnCacheMiss(
   }
 }
 
+export async function fetchSegmentPrefetchesForPPRDisabledRoute(
+  task: PrefetchTask,
+  route: FulfilledRouteCacheEntry,
+  dynamicRequestTree: FlightRouterState,
+  spawnedEntries: Map<string, PendingSegmentCacheEntry>
+): Promise<void> {
+  const href = task.key.href
+  const nextUrl = task.key.nextUrl
+  const headers: RequestHeaders = {
+    [RSC_HEADER]: '1',
+    [NEXT_ROUTER_PREFETCH_HEADER]: '1',
+    [NEXT_ROUTER_STATE_TREE_HEADER]: encodeURIComponent(
+      JSON.stringify(dynamicRequestTree)
+    ),
+  }
+  if (nextUrl !== null) {
+    headers[NEXT_URL] = nextUrl
+  }
+  try {
+    const response = await fetchPrefetchResponse(href, headers)
+    if (!response || !response.ok || !response.body) {
+      // Server responded with an error, or with a miss. We should still cache
+      // the response, but we can try again after 10 seconds.
+      rejectSegmentEntriesIfStillPending(spawnedEntries, Date.now() + 10 * 1000)
+      return
+    }
+    // Unlike the PPR response streams, this one won't contain hanging
+    // references, so we can pass it straight to the Flight client without
+    // extra processing.
+    const prefetchStream = response.body
+    const serverData = await (createFromNextReadableStream(
+      prefetchStream
+    ) as Promise<NavigationFlightResponse>)
+    writeDynamicRenderResponseIntoCache(
+      Date.now(),
+      response,
+      serverData,
+      route,
+      spawnedEntries
+    )
+  } catch (error) {
+    rejectSegmentEntriesIfStillPending(spawnedEntries, Date.now() + 10 * 1000)
+  }
+}
+
+function writeDynamicTreeResponseIntoCache(
+  now: number,
+  response: Response,
+  serverData: NavigationFlightResponse,
+  entry: PendingRouteCacheEntry,
+  couldBeIntercepted: boolean,
+  canonicalUrl: string,
+  routeIsPPREnabled: boolean
+) {
+  if (serverData.b !== getAppBuildId()) {
+    // The server build does not match the client. Treat as a 404. During
+    // an actual navigation, the router will trigger an MPA navigation.
+    // TODO: Consider moving the build ID to a response header so we can check
+    // it before decoding the response, and so there's one way of checking
+    // across all response types.
+    rejectRouteCacheEntry(entry, now + 10 * 1000)
+    return
+  }
+  const normalizedFlightDataResult = normalizeFlightData(serverData.f)
+  if (
+    // A string result means navigating to this route will result in an
+    // MPA navigation.
+    typeof normalizedFlightDataResult === 'string' ||
+    normalizedFlightDataResult.length !== 1
+  ) {
+    rejectRouteCacheEntry(entry, now + 10 * 1000)
+    return
+  }
+  const flightData = normalizedFlightDataResult[0]
+  if (!flightData.isRootRender) {
+    // Unexpected response format.
+    rejectRouteCacheEntry(entry, now + 10 * 1000)
+    return
+  }
+
+  const flightRouterState = flightData.tree
+  // TODO: Extract to function
+  const staleTimeHeader = response.headers.get(NEXT_ROUTER_STALE_TIME_HEADER)
+  const staleTime =
+    staleTimeHeader !== null
+      ? parseInt(staleTimeHeader, 10)
+      : STATIC_STALETIME_MS
+  fulfillRouteCacheEntry(
+    entry,
+    convertRootFlightRouterStateToRouteTree(flightRouterState),
+    flightData.head,
+    flightData.isHeadPartial,
+    now + staleTime,
+    couldBeIntercepted,
+    canonicalUrl,
+    routeIsPPREnabled
+  )
+}
+
+function rejectSegmentEntriesIfStillPending(
+  entries: Map<string, SegmentCacheEntry>,
+  staleAt: number
+) {
+  for (const entry of entries.values()) {
+    if (entry.status === EntryStatus.Pending) {
+      rejectSegmentCacheEntry(entry, staleAt)
+    }
+  }
+}
+
+function writeDynamicRenderResponseIntoCache(
+  now: number,
+  response: Response,
+  serverData: NavigationFlightResponse,
+  route: FulfilledRouteCacheEntry,
+  spawnedEntries: Map<string, PendingSegmentCacheEntry>
+) {
+  if (serverData.b !== getAppBuildId()) {
+    // The server build does not match the client. Treat as a 404. During
+    // an actual navigation, the router will trigger an MPA navigation.
+    // TODO: Consider moving the build ID to a response header so we can check
+    // it before decoding the response, and so there's one way of checking
+    // across all response types.
+    rejectSegmentEntriesIfStillPending(spawnedEntries, now + 10 * 1000)
+    return
+  }
+  const flightDatas = normalizeFlightData(serverData.f)
+  if (typeof flightDatas === 'string') {
+    // This means navigating to this route will result in an MPA navigation.
+    // TODO: We should cache this, too, so that the MPA navigation is immediate.
+    return
+  }
+  for (const flightData of flightDatas) {
+    const seedData = flightData.seedData
+    if (seedData !== null) {
+      // The data sent by the server represents only a subtree of the app. We
+      // need to find the part of the task tree that matches the response.
+      //
+      // segmentPath represents the parent path of subtree. It's a repeating
+      // pattern of parallel route key and segment:
+      //
+      //   [string, Segment, string, Segment, string, Segment, ...]
+      const segmentPath = flightData.segmentPath
+      let segmentKey = ROOT_SEGMENT_KEY
+      for (let i = 0; i < segmentPath.length; i += 2) {
+        const parallelRouteKey: string = segmentPath[i]
+        const segment: FlightRouterStateSegment = segmentPath[i + 1]
+        segmentKey = encodeChildSegmentKey(
+          segmentKey,
+          parallelRouteKey,
+          encodeSegment(segment)
+        )
+      }
+      const staleTimeHeader = response.headers.get(
+        NEXT_ROUTER_STALE_TIME_HEADER
+      )
+      const staleTime =
+        staleTimeHeader !== null
+          ? parseInt(staleTimeHeader, 10)
+          : STATIC_STALETIME_MS
+      writeSeedDataIntoCache(
+        now,
+        route,
+        now + staleTime,
+        seedData,
+        segmentKey,
+        spawnedEntries
+      )
+    }
+  }
+  // Any entry that's still pending was intentionally not rendered by the
+  // server, because it was inside the loading boundary. Mark them as rejected
+  // so we know not to fetch them again.
+  // TODO: If PPR is enabled on some routes but not others, then it's possible
+  // that a different page is able to do a per-segment prefetch of one of the
+  // segments we're marking as rejected here. We should mark on the segment
+  // somehow that the reason for the rejection is because of a non-PPR prefetch.
+  // That way a per-segment prefetch knows to disregard the rejection.
+  rejectSegmentEntriesIfStillPending(spawnedEntries, now + 10 * 1000)
+
+  // TODO: Set the size of the segments in the LRU. We don't know the
+  // exact size per segment, but we can estimate the average size by
+  // dividing response size by the number of segments.
+}
+
+function writeSeedDataIntoCache(
+  now: number,
+  route: FulfilledRouteCacheEntry,
+  staleAt: number,
+  seedData: CacheNodeSeedData,
+  key: string,
+  entriesOwnedByCurrentTask: Map<string, PendingSegmentCacheEntry>
+) {
+  // This function is used to write the result of a dynamic server request
+  // (CacheNodeSeedData) into the prefetch cache. It's used in cases where we
+  // want to treat a dynamic response as if it were static. The two examples
+  // where this happens are <Link prefetch={true}> (which implicitly opts
+  // dynamic data into being static) and when prefetching a PPR-disabled route
+  const rsc = seedData[1]
+  const loading = seedData[3]
+  const isPartial = rsc === null
+
+  // We should only write into cache entries that are owned by us. Or create
+  // a new one and write into that. We must never write over an entry that was
+  // created by a different task, because that causes data races.
+  const ownedEntry = entriesOwnedByCurrentTask.get(key)
+  if (ownedEntry !== undefined) {
+    fulfillSegmentCacheEntry(ownedEntry, rsc, loading, staleAt, isPartial)
+  } else {
+    // There's no matching entry. Attempt to create a new one.
+    const possiblyNewEntry = readOrCreateSegmentCacheEntry(now, route, key)
+    if (possiblyNewEntry.status === EntryStatus.Empty) {
+      // Confirmed this is a new entry. We can fulfill it.
+      const newEntry = possiblyNewEntry
+      fulfillSegmentCacheEntry(newEntry, rsc, loading, staleAt, isPartial)
+    } else {
+      // There was already an entry in the cache. We must not write over it.
+    }
+  }
+  // Recursively write the child data into the cache.
+  const seedDataChildren = seedData[2]
+  if (seedDataChildren !== null) {
+    for (const parallelRouteKey in seedDataChildren) {
+      const childSeedData = seedDataChildren[parallelRouteKey]
+      if (childSeedData !== null) {
+        const childSegment = childSeedData[0]
+        writeSeedDataIntoCache(
+          now,
+          route,
+          staleAt,
+          childSeedData,
+          encodeChildSegmentKey(
+            key,
+            parallelRouteKey,
+            encodeSegment(childSegment)
+          ),
+          entriesOwnedByCurrentTask
+        )
+      }
+    }
+  }
+}
+
 async function fetchSegmentPrefetchResponse(
   href: NormalizedHref,
   segmentPath: string,
@@ -716,6 +1080,13 @@ async function fetchSegmentPrefetchResponse(
   if (nextUrl !== null) {
     headers[NEXT_URL] = nextUrl
   }
+  return fetchPrefetchResponse(href, headers)
+}
+
+async function fetchPrefetchResponse(
+  href: NormalizedHref,
+  headers: RequestHeaders
+): Promise<Response | null> {
   const fetchPriority = 'low'
   const responsePromise = createFetch(new URL(href), headers, fetchPriority)
   trackPrefetchRequestBandwidth(responsePromise)

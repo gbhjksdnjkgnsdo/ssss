@@ -428,6 +428,10 @@ describe('app-dir static/dynamic handling', () => {
           export function generateStaticParams() {
             return [{slug: { invalid: true }}]
           }
+
+          export default function Page() {
+            return <h1>hi</h1>
+          }
         `
       )
 

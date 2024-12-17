@@ -80,6 +80,12 @@ export function Base() {
           }
         }
 
+        @media print {
+          :host {
+            display: none;
+          }
+        }
+
         .mono {
           font-family: var(--font-stack-monospace);
         }

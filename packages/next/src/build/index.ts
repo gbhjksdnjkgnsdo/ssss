@@ -1852,6 +1852,7 @@ export default async function build(
         const { configFileName, publicRuntimeConfig, serverRuntimeConfig } =
           config
         const runtimeEnvConfig = { publicRuntimeConfig, serverRuntimeConfig }
+        const sriEnabled = Boolean(config.experimental.sri?.algorithm)
 
         const nonStaticErrorPageSpan = staticCheckSpan.traceChild(
           'check-static-error-page'
@@ -1865,6 +1866,7 @@ export default async function build(
                 distDir,
                 runtimeEnvConfig,
                 checkingApp: false,
+                sriEnabled,
               }))
           )
 
@@ -1886,6 +1888,7 @@ export default async function build(
               pprConfig: config.experimental.ppr,
               cacheLifeProfiles: config.experimental.cacheLife,
               buildId,
+              sriEnabled,
             })
         )
 
@@ -1897,6 +1900,7 @@ export default async function build(
             distDir,
             runtimeEnvConfig,
             checkingApp: true,
+            sriEnabled,
           }
         )
 
@@ -1904,6 +1908,7 @@ export default async function build(
           page: appPageToCheck,
           distDir,
           runtimeEnvConfig,
+          sriEnabled,
         })
 
         // eslint-disable-next-line @typescript-eslint/no-shadow
@@ -2113,6 +2118,7 @@ export default async function build(
                             pprConfig: config.experimental.ppr,
                             cacheLifeProfiles: config.experimental.cacheLife,
                             buildId,
+                            sriEnabled,
                           })
                         }
                       )

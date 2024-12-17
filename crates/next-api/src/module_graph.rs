@@ -275,7 +275,7 @@ impl SingleModuleGraph {
     /// If passed, `root` is connected to the entries and include in `self.entries`.
     async fn new_inner(
         root: Option<ResolvedVc<Box<dyn Module>>>,
-        entries: &Vec<ResolvedVc<Box<dyn Module>>>,
+        entries: &[ResolvedVc<Box<dyn Module>>],
         visited_modules: &HashSet<ResolvedVc<Box<dyn Module>>>,
     ) -> Result<Vc<Self>> {
         let mut graph = DiGraph::new();
@@ -540,6 +540,10 @@ impl SingleModuleGraph {
 
 #[turbo_tasks::value_impl]
 impl SingleModuleGraph {
+    #[turbo_tasks::function]
+    async fn new_with_entry(entry: ResolvedVc<Box<dyn Module>>) -> Result<Vc<Self>> {
+        SingleModuleGraph::new_inner(None, &[entry], &Default::default()).await
+    }
     #[turbo_tasks::function]
     async fn new_with_entries(entries: Vc<Modules>) -> Result<Vc<Self>> {
         SingleModuleGraph::new_inner(None, &*entries.await?, &Default::default()).await
@@ -1002,6 +1006,7 @@ impl ReducedGraphs {
     pub async fn get_client_references_for_endpoint(
         &self,
         entry: Vc<Box<dyn Module>>,
+        has_layout_segments: bool,
     ) -> Result<Vc<ClientReferenceGraphResult>> {
         let span = tracing::info_span!("collect all client references for endpoint");
         async move {
@@ -1030,14 +1035,16 @@ impl ReducedGraphs {
                 result
             };
 
-            // Do this separately for now, because the graph traversal order messes up the order of
-            // the server_component_entries.
-            let ServerEntries {
-                server_utils,
-                server_component_entries,
-            } = &*find_server_entries(entry).await?;
-            result.server_utils = server_utils.clone();
-            result.server_component_entries = server_component_entries.clone();
+            if has_layout_segments {
+                // Do this separately for now, because the graph traversal order messes up the order
+                // of the server_component_entries.
+                let ServerEntries {
+                    server_utils,
+                    server_component_entries,
+                } = &*find_server_entries(entry).await?;
+                result.server_utils = server_utils.clone();
+                result.server_component_entries = server_component_entries.clone();
+            }
 
             Ok(result.cell())
         }
@@ -1050,16 +1057,26 @@ impl ReducedGraphs {
 async fn get_reduced_graphs_for_endpoint_inner(
     project: Vc<Project>,
     entry: ResolvedVc<Box<dyn Module>>,
+    has_layout_segments: bool,
     // TODO should this happen globally or per endpoint? Do they all have the same context?
     client_asset_context: Vc<Box<dyn AssetContext>>,
 ) -> Result<Vc<ReducedGraphs>> {
     let (is_single_page, graphs) = match &*project.next_mode().await? {
         NextMode::Development => (
             true,
-            async move { get_module_graph_for_endpoint(*entry).await }
-                .instrument(tracing::info_span!("module graph for endpoint"))
-                .await?
-                .clone_value(),
+            async move {
+                anyhow::Ok(if has_layout_segments {
+                    get_module_graph_for_endpoint(*entry).await?.clone_value()
+                } else {
+                    vec![
+                        SingleModuleGraph::new_with_entry(*entry)
+                            .to_resolved()
+                            .await?,
+                    ]
+                })
+            }
+            .instrument(tracing::info_span!("module graph for endpoint"))
+            .await?,
         ),
         NextMode::Build => (
             false,
@@ -1127,12 +1144,18 @@ async fn get_reduced_graphs_for_endpoint_inner(
 pub async fn get_reduced_graphs_for_endpoint(
     project: Vc<Project>,
     entry: Vc<Box<dyn Module>>,
+    has_layout_segments: bool,
     // TODO should this happen globally or per endpoint? Do they all have the same context?
     client_asset_context: Vc<Box<dyn AssetContext>>,
 ) -> Result<Vc<ReducedGraphs>> {
     // TODO get rid of this function once everything inside of
     // `get_reduced_graphs_for_endpoint_inner` calls `take_collectibles()` when needed
-    let result = get_reduced_graphs_for_endpoint_inner(project, entry, client_asset_context);
+    let result = get_reduced_graphs_for_endpoint_inner(
+        project,
+        entry,
+        has_layout_segments,
+        client_asset_context,
+    );
     if project.next_mode().await?.is_production() {
         result.strongly_consistent().await?;
         let _issues = result.take_collectibles::<Box<dyn Issue>>();

@@ -30,9 +30,10 @@ use turbopack_core::{
 
 use super::base::ReferencedAsset;
 use crate::{
+    analyzer::graph::EvalContext,
     chunk::{EcmascriptChunkPlaceable, EcmascriptExports},
     code_gen::{CodeGenerateable, CodeGeneration, CodeGenerationHoistedStmt},
-    magic_identifier,
+    magic_identifier, EcmascriptParsable,
 };
 
 #[derive(Clone, Hash, Debug, PartialEq, Eq, Serialize, Deserialize, TraceRawVcs)]
@@ -426,6 +427,7 @@ async fn emit_star_exports_issue(source_ident: Vc<AssetIdent>, message: RcStr) -
 #[turbo_tasks::value(shared, local)]
 #[derive(Hash, Debug)]
 pub struct EsmExports {
+    pub parsable: ResolvedVc<Box<dyn EcmascriptParsable>>,
     pub exports: BTreeMap<RcStr, EsmExport>,
     pub star_exports: Vec<ResolvedVc<Box<dyn ModuleReference>>>,
 }
@@ -517,17 +519,13 @@ impl CodeGenerateable for EsmExports {
                     if *mutable {
                         Some(quote!(
                             "([() => $local, ($new) => $local = $new])" as Expr,
-                            local = Ident::new(local.into(), DUMMY_SP, Default::default()),
-                            new = Ident::new(
-                                format!("new_{name}").into(),
-                                DUMMY_SP,
-                                Default::default()
-                            ),
+                            local = Ident::new(local.into(), DUMMY_SP, ctxt),
+                            new = Ident::new(format!("new_{name}").into(), DUMMY_SP, ctxt),
                         ))
                     } else {
                         Some(quote!(
                             "(() => $local)" as Expr,
-                            local = Ident::new((name as &str).into(), DUMMY_SP, Default::default())
+                            local = Ident::new((name as &str).into(), DUMMY_SP, ctxt)
                         ))
                     }
                 }

@@ -163,7 +163,7 @@ describe('app-dir - server source maps', () => {
 
   it('thrown SSR errors', async () => {
     const outputIndex = next.cliOutput.length
-    await next.render('/ssr-throw')
+    const browser = await next.browser('/ssr-throw')
 
     if (isNextDev) {
       await retry(() => {
@@ -198,6 +198,42 @@ describe('app-dir - server source maps', () => {
               "\n  digest: '"
       )
       expect(cliOutput).toMatch(/digest: '\d+'/)
+
+      if (isTurbopack) {
+        await expect(browser).toDisplayRedbox(`
+         {
+           "description": "Error: Boom",
+           "source": "app/ssr-throw/Thrower.js (4:9) @ throwError
+
+           2 |
+           3 | function throwError() {
+         > 4 |   throw new Error('Boom')
+             |         ^
+           5 | }
+           6 |
+           7 | export function Thrower() {",
+           "stack": "Thrower
+         app/ssr-throw/Thrower.js (8:3)",
+         }
+        `)
+      } else {
+        await expect(browser).toDisplayRedbox(`
+         {
+           "description": "Error: Boom",
+           "source": "app/ssr-throw/Thrower.js (4:9) @ throwError
+
+           2 |
+           3 | function throwError() {
+         > 4 |   throw new Error('Boom')
+             |         ^
+           5 | }
+           6 |
+           7 | export function Thrower() {",
+           "stack": "throwError
+         app/ssr-throw/Thrower.js (8:3)",
+         }
+        `)
+      }
     } else {
       // TODO: Test `next build` with `--enable-source-maps`.
     }

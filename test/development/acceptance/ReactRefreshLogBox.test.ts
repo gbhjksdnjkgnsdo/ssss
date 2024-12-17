@@ -3,13 +3,13 @@ import { createSandbox } from 'development-sandbox'
 import { FileRef, nextTestSetup } from 'e2e-utils'
 import {
   describeVariants as describe,
-  getRedboxCallStack,
   toggleCollapseCallStackFrames,
 } from 'next-test-utils'
 import path from 'path'
 import { outdent } from 'outdent'
 
-describe.each(['default', 'turbo'])('ReactRefreshLogBox %s', () => {
+describe.each(['default', 'turbo'])('ReactRefreshLogBox %s', (mode) => {
+  const isTurbopack = mode === 'turbo'
   const { next } = nextTestSetup({
     files: new FileRef(path.join(__dirname, 'fixtures', 'default-template')),
     skipStart: true,
@@ -786,10 +786,38 @@ describe.each(['default', 'turbo'])('ReactRefreshLogBox %s', () => {
         ],
       ])
     )
-    const { session, browser } = sandbox
-    await session.assertHasRedbox()
-    const texts = await getRedboxCallStack(browser)
-    expect(texts).toMatchSnapshot()
+    const { browser } = sandbox
+    if (isTurbopack) {
+      await expect(browser).toDisplayRedbox(`
+       {
+         "count": 1,
+         "description": "Error: anonymous error!",
+         "source": "pages/index.js (3:11) @ <unknown>
+       > 3 |     throw new Error("anonymous error!");
+           |           ^",
+         "stack": [
+           "Array.map <anonymous> (0:0)",
+           "Page pages/index.js (2:13)",
+         ],
+         "title": "Server Error",
+       }
+      `)
+    } else {
+      await expect(browser).toDisplayRedbox(`
+       {
+         "count": 1,
+         "description": "Error: anonymous error!",
+         "source": "pages/index.js (3:11) @ eval
+       > 3 |     throw new Error("anonymous error!");
+           |           ^",
+         "stack": [
+           "Array.map <anonymous> (0:0)",
+           "map pages/index.js (2:13)",
+         ],
+         "title": "Server Error",
+       }
+      `)
+    }
   })
 
   test('should hide unrelated frames in stack trace with node:internal calls', async () => {

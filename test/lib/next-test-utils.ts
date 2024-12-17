@@ -922,7 +922,9 @@ export async function getRedboxTotalErrorCount(browser: BrowserInterface) {
   return parseInt(header.match(/\d+ of (\d+) issue/)?.[1], 10)
 }
 
-export function getRedboxSource(browser: BrowserInterface) {
+export function getRedboxSource(
+  browser: BrowserInterface
+): Promise<string | undefined> {
   return browser.eval(() => {
     const portal = [].slice
       .call(document.querySelectorAll('nextjs-portal'))
@@ -937,7 +939,9 @@ export function getRedboxSource(browser: BrowserInterface) {
   })
 }
 
-export function getRedboxTitle(browser: BrowserInterface) {
+export function getRedboxTitle(
+  browser: BrowserInterface
+): Promise<string | null> {
   return browser.eval(() => {
     const portal = [].slice
       .call(document.querySelectorAll('nextjs-portal'))
@@ -949,7 +953,9 @@ export function getRedboxTitle(browser: BrowserInterface) {
   })
 }
 
-export function getRedboxDescription(browser: BrowserInterface) {
+export function getRedboxDescription(
+  browser: BrowserInterface
+): Promise<string> {
   return browser.eval(() => {
     const portal = [].slice
       .call(document.querySelectorAll('nextjs-portal'))
@@ -1247,17 +1253,46 @@ export async function hasRedboxCallStack(browser: BrowserInterface) {
 
 export async function getRedboxCallStack(
   browser: BrowserInterface
-): Promise<string | null> {
-  await browser.waitForElementByCss('[data-nextjs-call-stack-frame]', 30000)
+): Promise<string[] | null> {
+  return browser.eval(() => {
+    const portal = [].slice
+      .call(document.querySelectorAll('nextjs-portal'))
+      .find((p) => p.shadowRoot.querySelector('[data-nextjs-call-stack-frame]'))
+    const root = portal?.shadowRoot
+    const frameElements = root?.querySelectorAll(
+      '[data-nextjs-call-stack-frame]'
+    )
 
-  const callStackFrameElements = await browser.elementsByCss(
-    '[data-nextjs-call-stack-frame]'
-  )
-  const callStackFrameTexts = await Promise.all(
-    callStackFrameElements.map((f) => f.innerText())
-  )
+    const stack: string[] = []
+    if (frameElements !== undefined) {
+      let foundInternalFrame = false
+      for (const frameElement of frameElements) {
+        // `innerText` will be "${methodName}\n${location}".
+        // Ideally `innerText` would be "${methodName} ${location}"
+        // so that c&p automatically does the right thing.
+        const frame = frameElement.innerText.replace('\n', ' ')
 
-  return callStackFrameTexts.join('\n').trim()
+        // Feel free to adjust this heuristic if it accidentally hides too much.
+        const isInternalFrame =
+          // likely https://linear.app/vercel/issue/NDX-464
+          // location starts with `./dist` e.g. "NotFoundBoundary ./dist/esm/[...]"
+          / .\/dist\//.test(frame)
+
+        if (isInternalFrame) {
+          // We only add one of these frames.
+          // If we'd add all of them, the stack would change during refactorings which is annoying.
+          if (!foundInternalFrame) {
+            stack.push('<FIXME-internal-frame>')
+          }
+          foundInternalFrame = true
+        } else {
+          stack.push(frame)
+        }
+      }
+    }
+
+    return stack
+  })
 }
 
 export async function getRedboxCallStackCollapsed(

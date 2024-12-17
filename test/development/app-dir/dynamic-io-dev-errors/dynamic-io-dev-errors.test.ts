@@ -1,16 +1,6 @@
 import stripAnsi from 'strip-ansi'
 import { nextTestSetup } from 'e2e-utils'
-import {
-  assertHasRedbox,
-  assertNoRedbox,
-  getRedboxCallStack,
-  getRedboxDescription,
-  hasErrorToast,
-  retry,
-  openRedbox,
-  getRedboxSource,
-  toggleCollapseCallStackFrames,
-} from 'next-test-utils'
+import { assertNoRedbox, hasErrorToast, retry } from 'next-test-utils'
 import { createSandbox } from 'development-sandbox'
 import { outdent } from 'outdent'
 
@@ -22,11 +12,35 @@ describe('Dynamic IO Dev Errors', () => {
   it('should show a red box error on the SSR render', async () => {
     const browser = await next.browser('/error')
 
-    await openRedbox(browser)
-
-    expect(await getRedboxDescription(browser)).toMatchInlineSnapshot(
-      `"[ Server ] Error: Route "/error" used \`Math.random()\` outside of \`"use cache"\` and without explicitly calling \`await connection()\` beforehand. See more info here: https://nextjs.org/docs/messages/next-prerender-random"`
-    )
+    if (isTurbopack) {
+      await expect(browser).toDisplayCollapsedRedbox(`
+       {
+         "count": 1,
+         "description": "[ Server ] Error: Route "/error" used \`Math.random()\` outside of \`"use cache"\` and without explicitly calling \`await connection()\` beforehand. See more info here: https://nextjs.org/docs/messages/next-prerender-random",
+         "source": "app/error/page.tsx (2:23) @ Page
+       > 2 |   const random = Math.random()
+           |                       ^",
+         "stack": [
+           "JSON.parse <anonymous> (0:0)",
+         ],
+         "title": "Console Error",
+       }
+      `)
+    } else {
+      await expect(browser).toDisplayCollapsedRedbox(`
+       {
+         "count": 1,
+         "description": "[ Server ] Error: Route "/error" used \`Math.random()\` outside of \`"use cache"\` and without explicitly calling \`await connection()\` beforehand. See more info here: https://nextjs.org/docs/messages/next-prerender-random",
+         "source": "app/error/page.tsx (2:23) @ random
+       > 2 |   const random = Math.random()
+           |                       ^",
+         "stack": [
+           "JSON.parse <anonymous> (0:0)",
+         ],
+         "title": "Console Error",
+       }
+      `)
+    }
   })
 
   it('should show a red box error on client navigations', async () => {
@@ -36,11 +50,35 @@ describe('Dynamic IO Dev Errors', () => {
 
     await browser.elementByCss("[href='/error']").click()
 
-    await openRedbox(browser)
-
-    expect(await getRedboxDescription(browser)).toMatchInlineSnapshot(
-      `"[ Server ] Error: Route "/error" used \`Math.random()\` outside of \`"use cache"\` and without explicitly calling \`await connection()\` beforehand. See more info here: https://nextjs.org/docs/messages/next-prerender-random"`
-    )
+    if (isTurbopack) {
+      await expect(browser).toDisplayCollapsedRedbox(`
+       {
+         "count": 1,
+         "description": "[ Server ] Error: Route "/error" used \`Math.random()\` outside of \`"use cache"\` and without explicitly calling \`await connection()\` beforehand. See more info here: https://nextjs.org/docs/messages/next-prerender-random",
+         "source": "app/error/page.tsx (2:23) @ Page
+       > 2 |   const random = Math.random()
+           |                       ^",
+         "stack": [
+           "JSON.parse <anonymous> (0:0)",
+         ],
+         "title": "Console Error",
+       }
+      `)
+    } else {
+      await expect(browser).toDisplayCollapsedRedbox(`
+       {
+         "count": 1,
+         "description": "[ Server ] Error: Route "/error" used \`Math.random()\` outside of \`"use cache"\` and without explicitly calling \`await connection()\` beforehand. See more info here: https://nextjs.org/docs/messages/next-prerender-random",
+         "source": "app/error/page.tsx (2:23) @ random
+       > 2 |   const random = Math.random()
+           |                       ^",
+         "stack": [
+           "JSON.parse <anonymous> (0:0)",
+         ],
+         "title": "Console Error",
+       }
+      `)
+    }
   })
 
   it('should not log unhandled rejections for persistently thrown top-level errors', async () => {
@@ -63,7 +101,11 @@ describe('Dynamic IO Dev Errors', () => {
     const outputIndex = next.cliOutput.length
     const browser = await next.browser('/no-accessed-data')
 
-    await openRedbox(browser)
+    await retry(() => {
+      expect(next.cliOutput.slice(outputIndex)).toContain(
+        'Error: Route "/no-accessed-data"'
+      )
+    })
 
     expect(stripAnsi(next.cliOutput.slice(outputIndex))).toContain(
       `\nError: Route "/no-accessed-data": ` +
@@ -80,21 +122,42 @@ describe('Dynamic IO Dev Errors', () => {
             '\n    at tree (..')
     )
 
-    const description = await getRedboxDescription(browser)
-
-    expect(description).toMatchInlineSnapshot(
-      `"[ Server ] Error: Route "/no-accessed-data": A component accessed data, headers, params, searchParams, or a short-lived cache without a Suspense boundary nor a "use cache" above it. We don't have the exact line number added to error messages yet but you can see which component in the stack below. See more info: https://nextjs.org/docs/messages/next-prerender-missing-suspense"`
-    )
-
-    // Expand the stack frames, since the first frame `Page [Server] <anonymous>` is treated as ignored.
-    // TODO: Remove the filter of anonymous frames when we have a better way to handle them.
-    await toggleCollapseCallStackFrames(browser)
-    const stack = await getRedboxCallStack(browser)
-    // TODO: use snapshot testing for stack
-    // FIXME: avoid `next` code to be mapped to source code and filter them out even when sourcemap is enabled.
-    expect(stack).toContain('Page [Server]')
-    expect(stack).toContain('Root [Server]')
-    expect(stack).toContain('<anonymous> (2:1)')
+    if (isTurbopack) {
+      await expect(browser).toDisplayCollapsedRedbox(`
+       {
+         "count": 1,
+         "description": "[ Server ] Error: Route "/no-accessed-data": A component accessed data, headers, params, searchParams, or a short-lived cache without a Suspense boundary nor a "use cache" above it. We don't have the exact line number added to error messages yet but you can see which component in the stack below. See more info: https://nextjs.org/docs/messages/next-prerender-missing-suspense",
+         "source": undefined,
+         "stack": [
+           "Page [Server] <anonymous> (2:1)",
+           "main <anonymous> (2:1)",
+           "body <anonymous> (2:1)",
+           "html <anonymous> (2:1)",
+           "Root [Server] <anonymous> (2:1)",
+           "JSON.parse <anonymous> (0:0)",
+         ],
+         "title": "Console Error",
+       }
+      `)
+    } else {
+      await expect(browser).toDisplayCollapsedRedbox(`
+       {
+         "count": 1,
+         "description": "[ Server ] Error: Route "/no-accessed-data": A component accessed data, headers, params, searchParams, or a short-lived cache without a Suspense boundary nor a "use cache" above it. We don't have the exact line number added to error messages yet but you can see which component in the stack below. See more info: https://nextjs.org/docs/messages/next-prerender-missing-suspense",
+         "source": undefined,
+         "stack": [
+           "Page [Server] <anonymous> (2:1)",
+           "main <anonymous> (2:1)",
+           "body <anonymous> (2:1)",
+           "html <anonymous> (2:1)",
+           "Root [Server] <anonymous> (2:1)",
+           "<FIXME-internal-frame>",
+           "JSON.parse <anonymous> (0:0)",
+         ],
+         "title": "Console Error",
+       }
+      `)
+    }
   })
 
   it('should clear segment errors after correcting them', async () => {
@@ -115,16 +178,38 @@ describe('Dynamic IO Dev Errors', () => {
       ])
     )
     const { browser, session } = sandbox
-    await assertHasRedbox(browser)
-    const redbox = {
-      description: await getRedboxDescription(browser),
-      source: await getRedboxSource(browser),
+    if (isTurbopack) {
+      await expect(browser).toDisplayCollapsedRedbox(`
+       {
+         "count": NaN,
+         "description": "Failed to compile",
+         "source": "./app/page.tsx:1:14
+       Ecmascript file had an error
+       > 1 | export const revalidate = 10
+           |              ^^^^^^^^^^",
+         "stack": [],
+         "title": null,
+       }
+      `)
+    } else {
+      await expect(browser).toDisplayCollapsedRedbox(`
+       {
+         "count": NaN,
+         "description": "Failed to compile",
+         "source": "./app/page.tsx
+       Error:   x "revalidate" is not compatible with \`nextConfig.experimental.dynamicIO\`. Please remove it.
+          ,-[1:1]
+        1 | export const revalidate = 10
+          :              ^^^^^^^^^^
+        2 | export default function Page() {
+        3 |   return (
+        4 |     <div>Hello World</div>
+          \`----",
+         "stack": [],
+         "title": null,
+       }
+      `)
     }
-
-    expect(redbox.description).toMatchInlineSnapshot(`"Failed to compile"`)
-    expect(redbox.source).toContain(
-      '"revalidate" is not compatible with `nextConfig.experimental.dynamicIO`. Please remove it.'
-    )
 
     await session.patch(
       'app/page.tsx',
@@ -137,8 +222,6 @@ describe('Dynamic IO Dev Errors', () => {
     `
     )
 
-    await retry(async () => {
-      assertNoRedbox(browser)
-    })
+    await assertNoRedbox(browser)
   })
 })

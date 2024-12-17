@@ -480,7 +480,7 @@ pub struct Project {
 
     build_id: RcStr,
 
-    encryption_key: RcStr,
+    pub encryption_key: RcStr,
 
     preview_props: DraftModeOptions,
 }
@@ -677,6 +677,7 @@ impl Project {
             self.project_path(),
             node_execution_chunking_context,
             self.env(),
+            self.await?.encryption_key.clone(),
         ))
     }
 

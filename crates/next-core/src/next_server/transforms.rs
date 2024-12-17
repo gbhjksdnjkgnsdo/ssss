@@ -2,6 +2,7 @@ use anyhow::Result;
 use next_custom_transforms::transforms::strip_page_exports::ExportFilter;
 use turbo_tasks::Vc;
 use turbopack::module_options::ModuleRule;
+use turbopack_node::execution_context::ExecutionContext;
 
 use crate::{
     mode::NextMode,
@@ -27,6 +28,7 @@ use crate::{
 pub async fn get_next_server_transforms_rules(
     next_config: Vc<NextConfig>,
     context_ty: ServerContextType,
+    execution_context: Vc<ExecutionContext>,
     mode: Vc<NextMode>,
     foreign_code: bool,
     next_runtime: NextRuntime,
@@ -57,6 +59,7 @@ pub async fn get_next_server_transforms_rules(
     let dynamic_io_enabled = *next_config.enable_dynamic_io().await?;
     let cache_kinds = next_config.cache_kinds().to_resolved().await?;
     let mut is_app_dir = false;
+    let encryption_key = execution_context.await?.encryption_key.clone();
 
     let is_server_components = match context_ty {
         ServerContextType::Pages { pages_dir } | ServerContextType::PagesApi { pages_dir } => {
@@ -90,6 +93,7 @@ pub async fn get_next_server_transforms_rules(
             // need to apply to foreign code too
             rules.push(get_server_actions_transform_rule(
                 ActionsTransform::Client,
+                encryption_key,
                 mdx_rs,
                 dynamic_io_enabled,
                 cache_kinds,
@@ -102,6 +106,7 @@ pub async fn get_next_server_transforms_rules(
         ServerContextType::AppRSC { .. } => {
             rules.push(get_server_actions_transform_rule(
                 ActionsTransform::Server,
+                encryption_key,
                 mdx_rs,
                 dynamic_io_enabled,
                 cache_kinds,
@@ -114,6 +119,7 @@ pub async fn get_next_server_transforms_rules(
         ServerContextType::AppRoute { .. } => {
             rules.push(get_server_actions_transform_rule(
                 ActionsTransform::Server,
+                encryption_key,
                 mdx_rs,
                 dynamic_io_enabled,
                 cache_kinds,

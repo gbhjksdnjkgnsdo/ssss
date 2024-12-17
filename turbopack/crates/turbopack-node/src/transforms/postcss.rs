@@ -463,6 +463,7 @@ impl PostCssTransformedAsset {
             project_path,
             chunking_context,
             env,
+            ..
         } = &*self.execution_context.await?;
 
         // For this postcss transform, there is no gaurantee that looking up for the

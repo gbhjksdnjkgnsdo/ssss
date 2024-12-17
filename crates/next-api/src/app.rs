@@ -11,8 +11,7 @@ use next_core::{
     get_edge_resolve_options_context, get_next_package,
     next_app::{
         get_app_client_references_chunks, get_app_client_shared_chunk_group, get_app_page_entry,
-        get_app_route_entry, include_modules_module::IncludeModulesModule,
-        metadata::route::get_app_metadata_route_entry, AppEntry, AppPage,
+        get_app_route_entry, metadata::route::get_app_metadata_route_entry, AppEntry, AppPage,
     },
     next_client::{
         get_client_module_options_context, get_client_resolve_options_context,
@@ -55,7 +54,7 @@ use turbopack::{
 use turbopack_core::{
     asset::AssetContent,
     chunk::{
-        availability_info::AvailabilityInfo, ChunkingContext, ChunkingContextExt,
+        availability_info::AvailabilityInfo, ChunkableModule, ChunkingContext, ChunkingContextExt,
         EntryChunkGroupResult, EvaluatableAsset, EvaluatableAssets,
     },
     file_source::FileSource,
@@ -73,7 +72,7 @@ use crate::{
     dynamic_imports::{collect_chunk_group, collect_evaluated_chunk_group},
     font::create_font_manifest,
     loadable_manifest::create_react_loadable_manifest,
-    module_graph::get_reduced_graphs_for_endpoint,
+    module_graph::{get_reduced_graphs_for_endpoint, ReducedGraphs},
     nft_json::NftJsonAsset,
     paths::{
         all_paths_in_root, all_server_paths, get_asset_paths_from_root, get_js_paths_from_root,
@@ -81,7 +80,7 @@ use crate::{
     },
     project::Project,
     route::{AppPageRoute, Endpoint, Route, Routes, WrittenEndpoint},
-    server_actions::create_server_actions_manifest,
+    server_actions::{build_server_actions_loader, create_server_actions_manifest},
     webpack_stats::generate_webpack_stats,
 };
 
@@ -1495,16 +1494,23 @@ impl AppEndpoint {
                         let client_references = client_references.await?;
                         let span = tracing::trace_span!("server utils");
                         async {
-                            let utils_module = IncludeModulesModule::new(
-                                AssetIdent::from_path(this.app_project.project().project_path())
-                                    .with_modifier(server_utils_modifier()),
-                                client_references.server_utils.iter().map(|v| **v).collect(),
-                            );
-
+                            let server_utils = client_references
+                                .server_utils
+                                .iter()
+                                .map(|m| async move {
+                                    Ok(*ResolvedVc::try_downcast::<Box<dyn ChunkableModule>>(*m)
+                                        .await?
+                                        .context("Expected server utils to be chunkable")?)
+                                })
+                                .try_join()
+                                .await?;
                             let chunk_group = chunking_context
-                                .chunk_group(
-                                    utils_module.ident(),
-                                    Vc::upcast(utils_module),
+                                .chunk_group_multiple(
+                                    AssetIdent::from_path(
+                                        this.app_project.project().project_path(),
+                                    )
+                                    .with_modifier(server_utils_modifier()),
+                                    server_utils,
                                     Value::new(current_availability_info),
                                 )
                                 .await?;
@@ -1710,8 +1716,42 @@ impl Endpoint for AppEndpoint {
 
     #[turbo_tasks::function]
     async fn root_modules(self: Vc<Self>) -> Result<Vc<Modules>> {
-        let rsc_entry = self.app_endpoint_entry().await?.rsc_entry;
-        Ok(Vc::cell(vec![rsc_entry]))
+        Ok(Vc::cell(vec![self.app_endpoint_entry().await?.rsc_entry]))
+    }
+
+    #[turbo_tasks::function]
+    async fn additional_root_modules(
+        self: Vc<Self>,
+        graphs: Vc<ReducedGraphs>,
+    ) -> Result<Vc<Modules>> {
+        let this = self.await?;
+        let app_entry = self.app_endpoint_entry().await?;
+        let rsc_entry = app_entry.rsc_entry;
+        let runtime = app_entry.config.await?.runtime.unwrap_or_default();
+
+        let actions = graphs.get_server_actions_for_endpoint(
+            *rsc_entry,
+            match runtime {
+                NextRuntime::Edge => Vc::upcast(this.app_project.edge_rsc_module_context()),
+                NextRuntime::NodeJs => Vc::upcast(this.app_project.rsc_module_context()),
+            },
+        );
+
+        let server_actions_loader = ResolvedVc::upcast(
+            build_server_actions_loader(
+                this.app_project.project().project_path(),
+                app_entry.original_name.clone(),
+                actions,
+                match runtime {
+                    NextRuntime::Edge => Vc::upcast(this.app_project.edge_rsc_module_context()),
+                    NextRuntime::NodeJs => Vc::upcast(this.app_project.rsc_module_context()),
+                },
+            )
+            .to_resolved()
+            .await?,
+        );
+
+        Ok(Vc::cell(vec![server_actions_loader]))
     }
 }
 

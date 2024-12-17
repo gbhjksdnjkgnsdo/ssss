@@ -1397,6 +1397,7 @@ impl Project {
         any_output_changed(roots, path, false)
     }
 
+    /// The Next.js client runtime modules.
     #[turbo_tasks::function]
     pub async fn client_main_modules(self: Vc<Self>) -> Result<Vc<Modules>> {
         let pages_project = self.pages_project();
